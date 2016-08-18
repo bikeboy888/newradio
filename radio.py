@@ -15,7 +15,7 @@ import sys
 from Adafruit_CharLCDPlate import Adafruit_CharLCDPlate
 import re
 import shlex, subprocess
-from time import strftime, sleep
+from time import strftime, sleep, time
 from unidecode import unidecode
 
 DEBUG = False
@@ -24,6 +24,18 @@ def fixed_length(str, length):
   'Truncate and pad str to length'
   return ('{:<%d}' % length).format(str[:length])
 
+def scroller(mark, text, length):
+  if len(mark+text) < length:
+    return fixed_length(mark+text, length)
+  startpad = 3
+  endpad = 6
+  duration = len(mark+text) - length + (startpad + endpad)
+  frame = int(time() * 1.0) % duration - startpad
+  if frame <= 0:
+    return fixed_length(mark+text, length)
+  if frame + length > len(mark+text):
+    return fixed_length(mark+(text[len(text)-length+1:]), length)
+  return fixed_length(mark+text[frame:], length)
 
 class Node:
   '''
@@ -40,6 +52,26 @@ class Node:
   def __repr__(self):
     return 'node:' + self.text
 
+
+class IPAddress(Node):
+  def __init__(self):
+    self.mark = '-'
+    self.parent = None
+  
+  def command(self, cmd):
+    print shlex.split(cmd)
+    result = subprocess.check_output(
+      shlex.split(cmd), stderr=subprocess.STDOUT
+    )
+    result = result.rstrip().split('\n')
+    print cmd, '-->', result
+    return result
+
+  def gettext(self):
+    return self.command('hostname -I')[0]
+
+  text = property(gettext)
+  
 
 class Timer(Node):
   def __init__(self):
@@ -110,11 +142,9 @@ class App:
         str += '\n'
       if row < len(self.folder.items):
         if row == self.selected:
-          line = self.folder.items[row].mark
+          line = scroller(self.folder.items[row].mark, self.folder.items[row].text, self.COLS)
         else:
-          line = ' '
-
-        line = fixed_length(line + self.folder.items[row].text, self.COLS)
+          line = fixed_length(' ' + self.folder.items[row].text, self.COLS)
         str += line
 
         if DEBUG:
@@ -268,7 +298,7 @@ class Radio(App):
       Folder('Pauls iRadio', (
         Playlists(self),
         Folder('Settings', (
-          Node(self.command('hostname -I')[0]),
+          IPAddress(),
           Timer(),
         )),
       ))
