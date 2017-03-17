@@ -384,6 +384,12 @@ def start_idle():
 #----------------------------------------------------------------------
 
 def shutdown_now():
+  write_lines( [
+    "Shutting down",
+    "See you later!"
+  ] );
+  set_backlight(Adafruit_CharLCDPlate.OFF)
+  shell_command("sudo shutdown -h now")
   sys.exit()
 
 #----------------------------------------------------------------------
