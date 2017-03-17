@@ -16,11 +16,11 @@ KEY_STATION = 'station'
 KEY_VOLUME = 'volume'
 KEY_DEBUG = 'debug'
 KEY_USE_LCD = 'use_lcd'
-KEY_LEFT = 'left'
-KEY_RIGHT = 'right'
-KEY_UP = 'up'
-KEY_DOWN = 'down'
-KEY_SELECT = 'select'
+FLAG_SELECT = 1
+FLAG_LEFT = 2
+FLAG_RIGHT = 4
+FLAG_UP = 8
+FLAG_DOWN = 16
 FILE_READONLY = 'r'
 FILE_WRITE = 'w'
 CMD_MPC_LSPLAYLISTS = 'mpc lsplaylists'
@@ -47,8 +47,6 @@ data = {
   KEY_DEBUG: False
 }
 
-lastinput = { }
-input = { }
 scroller_time = time()
 last_input_time = time()
 backlight = Adafruit_CharLCDPlate.ON
@@ -239,28 +237,7 @@ def write_lines(lines):
 
 #----------------------------------------------------------------------
 
-def set_lastinput():
-  global lastinput, input
-  lastinput[KEY_LEFT] = input[KEY_LEFT]
-  lastinput[KEY_RIGHT] = input[KEY_RIGHT]
-  lastinput[KEY_UP] = input[KEY_UP]
-  lastinput[KEY_DOWN] = input[KEY_DOWN]
-  lastinput[KEY_SELECT] = input[KEY_SELECT]
-
-#----------------------------------------------------------------------
-
-def reset_input():
-  global lastinput, input
-  input[KEY_LEFT] = False
-  input[KEY_RIGHT] = False
-  input[KEY_UP] = False
-  input[KEY_DOWN] = False
-  input[KEY_SELECT] = False
-
-#----------------------------------------------------------------------
-
 def debug_get_input():
-  global input
   for event in pygame.event.get():
     if event.type == pygame.QUIT:
       pygame.quit()
@@ -268,40 +245,46 @@ def debug_get_input():
   pressed = pygame.key.get_pressed()
   if pressed[pygame.K_q] == 1:
     sys.exit()
+  res = 0
   if pressed[pygame.K_SPACE] == 1:
-    input[KEY_SELECT] = True
+    res |= FLAG_SELECT
   if pressed[pygame.K_RETURN] == 1:
-    input[KEY_SELECT] = True
+    res |= FLAG_SELECT
   if pressed[pygame.K_LEFT] == 1:
-    input[KEY_LEFT] = True
+    res |= FLAG_LEFT
   if pressed[pygame.K_RIGHT] == 1:
-    input[KEY_RIGHT] = True
+    res |= FLAG_RIGHT
   if pressed[pygame.K_UP] == 1:
-    input[KEY_UP] = True
+    res |= FLAG_UP
   if pressed[pygame.K_DOWN] == 1:
-    input[KEY_DOWN] = True
+    res |= FLAG_DOWN
+  return res
 
 #----------------------------------------------------------------------
 
 def lcd_get_input():
+  res = 0
   if lcd.buttonPressed(lcd.SELECT):
-    input[KEY_SELECT] = True
+    res |= FLAG_SELECT
   if lcd.buttonPressed(lcd.LEFT):
-    input[KEY_LEFT] = True
+    res |= FLAG_LEFT
   if lcd.buttonPressed(lcd.RIGHT):
-    input[KEY_RIGHT] = True
+    res |= FLAG_RIGHT
   if lcd.buttonPressed(lcd.UP):
-    input[KEY_UP] = True
+    res |= FLAG_UP
   if lcd.buttonPressed(lcd.DOWN):
-    input[KEY_DOWN] = True
+    res |= FLAG_DOWN
+  return res
 
 #----------------------------------------------------------------------
 
 def get_input():
+  res = 0
   if get_debug():
-    debug_get_input()
+    res |= debug_get_input()
   if get_use_lcd():
-    lcd_get_input()
+    res |= lcd_get_input()
+  return res
 
 #----------------------------------------------------------------------
 
@@ -402,35 +385,34 @@ if not get_use_lcd():
   set_data(KEY_DEBUG, True)
 if get_debug():
   debug_init()
-reset_input()
+input = 0
 write_lines_time = 0
 shutdown_time = 0
 play_next_station(0)
 while True:
-  set_lastinput()
-  reset_input()
-  get_input()
-  if input[KEY_LEFT]:
+  lastinput = input
+  input = get_input()
+  if input & FLAG_LEFT:
     cancel_idle()
-    if not lastinput[KEY_LEFT]:
+    if not (lastinput & FLAG_LEFT):
       play_next_station(-1)
       scroller_time = time()
-  elif input[KEY_RIGHT]:
+  elif input & FLAG_RIGHT:
     cancel_idle()
-    if not lastinput[KEY_RIGHT]:
+    if not (lastinput & FLAG_RIGHT):
       play_next_station(1)
       scroller_time = time()
-  elif input[KEY_UP]:
+  elif input & FLAG_UP:
     cancel_idle()
-    if not lastinput[KEY_UP]:
+    if not (lastinput & FLAG_UP):
       adjust_volume(5)
-  elif input[KEY_DOWN]:
+  elif input & FLAG_DOWN:
     cancel_idle()
-    if not lastinput[KEY_DOWN]:
+    if not (lastinput & FLAG_DOWN):
       adjust_volume(-5)
-  elif input[KEY_SELECT]:
+  elif input & FLAG_SELECT:
     cancel_idle()
-    if not lastinput[KEY_SELECT]:
+    if not (lastinput & FLAG_SELECT):
       radio_fix()
       shutdown_time = time() + SHUTDOWN_COUNTDOWN
     if time() > shutdown_time:
