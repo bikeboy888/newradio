@@ -3,16 +3,16 @@
 #----------------------------------------------------------------------
 
 from Adafruit_CharLCDPlate import Adafruit_CharLCDPlate
-import json
-import commands
-import pygame
-import sys
+import json, commands, pygame, sys, os
 from time import time, strftime
 
 #----------------------------------------------------------------------
 
-# RADIO_CONFIG_FILE = '/home/pi/radio/radio.cfg'
-RADIO_CONFIG_FILE = '/tmp/radio.cfg'
+IS_ROOT = os.getenv('USER') == 'root'
+
+#----------------------------------------------------------------------
+
+RADIO_CONFIG_FILE = '/etc/radio.conf' if IS_ROOT else '/home/pi/radio/radio.conf'
 KEY_STATION = 'station'
 KEY_VOLUME = 'volume'
 KEY_DEBUG = 'debug'
@@ -398,6 +398,10 @@ if get_use_lcd():
   lcd_init()
 if not get_use_lcd():
   set_data(KEY_DEBUG, True)
+if IS_ROOT:
+  set_data(KEY_DEBUG, False)
+if not get_use_lcd() and not get_debug():
+  sys.exit()
 if get_debug():
   debug_init()
 write_lines( [
