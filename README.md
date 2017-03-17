@@ -1,6 +1,13 @@
-radio
-=====
+Internet Radio
+--------------
 
-Internet Radio for Raspberry PI, based in MPD / Adafruit LCD Plate / Python.
-For details on how to set this up please have a look at the project description at 
-http://tinkerthon.de/2013/04/internet-radio-mit-raspberrypi-2-zeiligem-rgb-lcd-und-5-tasten/
+This is yet another Internet Radio project for the Raspberry PI.
+It's based on MPD / Adafruit LCD Plate and Python.
+
+bikeboy888, 17 Mar 2017
+
+History
+-------
+ - 17 Mar 2017: Major rewrite UI/UX for simpler operation
+ - 15 Apr 2015: Initially forked from https://github.com/oschettler/radio
+
