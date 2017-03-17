@@ -1,415 +1,446 @@
 #!/usr/bin/python
-# -*- coding: utf-8 -*-
-#
-# A simple internet radio for RaspberryPI
-# Based on mpd/mpc and the Character LCD Plate by Adafruit
-#
-# The basic navigation code is based on lcdmenu.py by Alan Aufderheide
-#
-# Copyright (c) 2013 Olav Schettler
-# Open source. MIT license
-#
-import signal
-import sys
+
+#----------------------------------------------------------------------
 
 from Adafruit_CharLCDPlate import Adafruit_CharLCDPlate
-import re
-import shlex, subprocess
-from time import strftime, sleep, time
-from unidecode import unidecode
+import json
+import commands
+import pygame
+import sys
+from time import time, strftime
 
-DEBUG = False
+#----------------------------------------------------------------------
 
-def fixed_length(str, length):
-  'Truncate and pad str to length'
-  return ('{:<%d}' % length).format(str[:length])
+RADIO_CONFIG_FILE = '/home/pi/radio/radio.cfg'
+KEY_STATION = 'station'
+KEY_VOLUME = 'volume'
+KEY_DEBUG = 'debug'
+KEY_USE_LCD = 'use_lcd'
+KEY_LEFT = 'left'
+KEY_RIGHT = 'right'
+KEY_UP = 'up'
+KEY_DOWN = 'down'
+KEY_SELECT = 'select'
+FILE_READONLY = 'r'
+FILE_WRITE = 'w'
+CMD_MPC_LSPLAYLISTS = 'mpc lsplaylists'
+CMD_MPC_STOP = 'mpc stop'
+CMD_MPC_PLAY = 'mpc play'
+CMD_MPC_CLEAR = 'mpc clear'
+CMD_MPC_LOAD = 'mpc load'
+CMD_MPC_VOLUME = 'mpc volume'
+CMD_MPC_CURRENT = 'mpc current'
+PYGAME_CAPTION = 'Internet Radio'
+PYGAME_WIDTH = 500
+PYGAME_HEIGHT = 100
+FONT_MONOSPACE = 'monospace'
+FONT_MONOSPACE_SIZE = 16
+SHUTDOWN_COUNTDOWN = 5
+STR_NEWLINE = '\n'
+STR_NO_STATION = ''
+STR_SPACE = ' '
+COLS = 16
+ROWS = 2
 
-def scroller(mark, text, length):
-  if len(mark+text) < length:
-    return fixed_length(mark+text, length)
-  startpad = 3
-  endpad = 6
-  duration = len(mark+text) - length + (startpad + endpad)
-  frame = int(time() * 1.0) % duration - startpad
-  if frame <= 0:
-    return fixed_length(mark+text, length)
-  if frame + length > len(mark+text):
-    return fixed_length(mark+(text[len(text)-length+1:]), length)
-  return fixed_length(mark+text[frame:], length)
+data = {
+  KEY_USE_LCD: True,
+  KEY_DEBUG: False
+}
 
-class Node:
-  '''
-  Base class for nodes in a hierarchical navigation tree
-  '''
-  def __init__(self, text):
-    self.mark = '-'
-    self.parent = None
-    self.text = text
-  
-  def into(self):
+lastinput = { }
+input = { }
+scroller_time = time()
+last_input_time = time()
+backlight = Adafruit_CharLCDPlate.ON
+
+#----------------------------------------------------------------------
+
+def read_data():
+  global data
+  try:
+    with open(RADIO_CONFIG_FILE, FILE_READONLY) as infile:
+      data = json.load(infile)
+  except:
     pass
-  
-  def __repr__(self):
-    return 'node:' + self.text
 
+#----------------------------------------------------------------------
 
-class IPAddress(Node):
-  def __init__(self):
-    self.mark = '-'
-    self.parent = None
-  
-  def command(self, cmd):
-    print shlex.split(cmd)
-    result = subprocess.check_output(
-      shlex.split(cmd), stderr=subprocess.STDOUT
-    )
-    result = result.rstrip().split('\n')
-    print cmd, '-->', result
-    return result
+def write_data():
+  with open(RADIO_CONFIG_FILE, FILE_WRITE) as outfile:
+    outfile.write(json.dumps(data, indent=4))
+    outfile.write(STR_NEWLINE)
 
-  def gettext(self):
-    return self.command('hostname -I')[0]
+#----------------------------------------------------------------------
 
-  text = property(gettext)
-  
+def get_data(prop, defval=False):
+  return data[prop] if prop in data else defval
 
-class Timer(Node):
-  def __init__(self):
-    self.mark = '-'
-    self.parent = None
-  
-  def gettext(self):
-    print "TT"
-    return strftime('%H:%M:%S %d.%m')
+#----------------------------------------------------------------------
 
-  text = property(gettext)
-  
-
-class Folder(Node):
-  def __init__(self, text, items=[]):
-    Node.__init__(self, text)
-    self.mark = '>'
-    self.setItems(items)
-  
-  def setItems(self, items):
-    self.items = items
-    for item in self.items:
-      item.parent = self
-
-
-class Playlists(Folder):
-  def __init__(self, radio):
-    Folder.__init__(self, 'Playlists')
-    self.radio = radio
-
-  def into(self):
-    print "into", repr(self)
-    self.setItems([
-      Playlist(playlist, self.radio) for playlist in self.radio.command('mpc lsplaylists')
-    ])
-
-
-class FinishException(Exception):
-  pass
-
-
-class App:
-  '''
-  Base class of applications and applets
-  '''
-  ROWS = 2
-  COLS = 16
-
-  def __init__(self, lcd, folder):
-    self.lcd = lcd
-    self.folder = folder
-    self.top = 0
-    self.selected = 0
-
-  def display(self):
-    if self.top > len(self.folder.items) - self.ROWS:
-      self.top = len(self.folder.items) - self.ROWS
-
-    if self.top < 0:
-      self.top = 0
-
-    if DEBUG:
-      print '------------------'
-
-    str = ''
-    for row in range(self.top, self.top + self.ROWS):
-      if row > self.top:
-        str += '\n'
-      if row < len(self.folder.items):
-        if row == self.selected:
-          line = scroller(self.folder.items[row].mark, self.folder.items[row].text, self.COLS)
-        else:
-          line = fixed_length(' ' + self.folder.items[row].text, self.COLS)
-        str += line
-
-        if DEBUG:
-          print('|' + line + '|')
-
-    if DEBUG:
-      print '------------------'
-
-    self.lcd.home()
-    self.lcd.message(str)
-
-
-  def up(self):
-    if self.selected == 0:
-      return
-    elif self.selected > self.top:
-      self.selected -= 1
-    else:
-      self.top -= 1
-      self.selected -= 1
-
-
-  def down(self):
-    if self.selected + 1 == len(self.folder.items):
-      return
-    elif self.selected < self.top + self.ROWS - 1:
-      self.selected += 1
-    else:
-      self.top += 1
-      self.selected += 1
-
-
-  def left(self):
-    if not isinstance(self.folder.parent, Folder):
-      return
-
-    # find the current in the parent
-    itemno = 0
-    index = 0
-    for item in self.folder.parent.items:
-      if self.folder == item:
-        if DEBUG:
-          print 'foundit:', item
-        index = itemno
-      else:
-          itemno += 1
-    if index < len(self.folder.parent.items):
-      self.folder = self.folder.parent
-      self.top = index
-      self.selected = index
-    else:
-      self.folder = self.folder.parent
-      self.top = 0
-      self.selected = 0
-
-
-  def right(self):
-    if isinstance(self.folder.items[self.selected], Folder):
-      self.folder = self.folder.items[self.selected]
-      self.top = 0
-      self.selected = 0
-      self.folder.into()
-    elif isinstance(self.folder.items[self.selected], Applet):
-      self.folder.items[self.selected].run()
-
-
-  def select(self):
-    if isinstance(self.folder.items[self.selected], Applet):
-      self.folder.items[self.selected].run()
-
-
-  def command(self, cmd):
-    print shlex.split(cmd)
-    result = subprocess.check_output(
-      shlex.split(cmd), stderr=subprocess.STDOUT
-    )
-    result = result.rstrip().split('\n')
-    print cmd, '-->', result
-    return result
-
-
-  def tick(self):
-    '''
-    In case variable information is displayed, refresh every second
-    '''
-    if self.ticks % 10 == 0:
-      self.display()
-
-
-  def handlesignal(self, signum, frame):
-    self.lcd.clear()
-    self.lcd.backlight(Adafruit_CharLCDPlate.OFF)
-    sys.exit(0)
-
-  def run(self):
-    '''
-    Basic event loop of the application
-    '''
-    'catch shutdown'
-    signal.signal(signal.SIGTERM, self.handlesignal)
-
-    self.ticks = 0
-    self.display()
-
-
-    last_buttons = None
-
-    while True:
-      self.tick()
-      self.ticks += 1
-      sleep(0.1)
-
-      buttons = self.lcd.buttons()
-      if last_buttons == buttons:
-        continue
-      last_buttons = buttons
-
-      try:
-        if (self.lcd.buttonPressed(self.lcd.LEFT)):
-          self.left()
-          self.display()
-
-        if (self.lcd.buttonPressed(self.lcd.UP)):
-          self.up()
-          self.display()
-
-        if (self.lcd.buttonPressed(self.lcd.DOWN)):
-          self.down()
-          self.display()
-
-        if (self.lcd.buttonPressed(self.lcd.RIGHT)):
-          self.right()
-          self.display()
-
-        if (self.lcd.buttonPressed(self.lcd.SELECT)):
-          self.select()
-          self.display()
-
-      except FinishException:
-        return
-
-class Radio(App):
-  '''
-  The application.
-  '''
-  def __init__(self):
-    self.command('mpc stop')
-
-    App.__init__(self,
-      Adafruit_CharLCDPlate(),
-      Folder('Pauls iRadio', (
-        Playlists(self),
-        Folder('Settings', (
-          IPAddress(),
-          Timer(),
-        )),
-      ))
-    )
-
-class Applet(App):
-  def __init__(self, text, app):
-    self.mark = '*'
-    self.parent = None
-    self.text = text
-    self.app = app
-    self.lcd = app.lcd
-
-  def command(self, cmd):
-    return self.app.command(cmd)
-
-  def left(self):
+def set_data(prop, val):
+  if prop in data and data[prop] == val:
     return
+  data[prop] = val
+  write_data()
 
-  def right(self):
+#----------------------------------------------------------------------
+
+def scroller(text):
+  if len(text) <= COLS:
+    return text
+  scroller_text = text + ' '
+  skip = int((time() - scroller_time)) % len(scroller_text)
+  scroller_text = (scroller_text + scroller_text)[skip:skip+COLS-1]
+  return scroller_text
+
+#----------------------------------------------------------------------
+
+def get_station():
+  return get_data(KEY_STATION, STR_NO_STATION)
+
+#----------------------------------------------------------------------
+
+def set_station(station):
+  set_data(KEY_STATION, station)
+
+#----------------------------------------------------------------------
+
+def get_volume(defval=100):
+  station = get_station()
+  if station == STR_NO_STATION:
+    return defval
+  if not KEY_VOLUME in data:
+    return defval
+  if not station in data[KEY_VOLUME]:
+    return defval
+  return data[KEY_VOLUME][station]
+
+#----------------------------------------------------------------------
+
+def set_volume(val):
+  station = get_station()
+  if station == STR_NO_STATION:
     return
-
-  def up(self):
-    return
-
-  def down(self):
-    return
-
-  def select(self):
-    return
-
-
-class Playlist(Applet):
-  volumes = (0, 60, 70, 80, 85, 90, 95, 100)
-
-  def display(self):
-    self.lines = (
-      unidecode(self.command('mpc -f %name% current')[0].split(',', 1)[0]),
-      unidecode(self.command('mpc -f %title% current')[0]),
-    )
-
-    self.volume = int(re.search(r'\d+',
-      self.command('mpc volume')[0]
-    ).group())
-
-    self.dir = 'L'
-    self.shift = 0
-
-
-  def tick(self):
-    if self.ticks % 5 != 0:
+  if not KEY_VOLUME in data:
+    data[KEY_VOLUME] = { }
+  if station in data[KEY_VOLUME]:
+    if data[KEY_VOLUME][station] == val:
       return
+  data[KEY_VOLUME][station] = val
+  write_data()
 
-    if self.lines[0] == '':
-      self.command('mpc volume 70')
-      self.display()
-      return
+#----------------------------------------------------------------------
 
-    str = ''
-    str += fixed_length(self.lines[0], self.COLS)
-    str += '\n' + fixed_length(self.lines[1][self.shift:], self.COLS)
-    if DEBUG:
-      print '------------------'
-      for line in str.split('\n'):
-        print '|' + line + '|'
-      print '------------------'
+def get_debug():
+  return get_data(KEY_DEBUG)
 
-    self.lcd.home()
-    self.lcd.message(str)
+#----------------------------------------------------------------------
 
-    if self.dir == 'L':
-      if self.shift + self.COLS < len(self.lines[1]):
-        self.shift += 1
-      else:
-        self.dir = 'R'
-    else:
-      if self.shift > 0:
-        self.shift -= 1
-      else:
-        self.display()
+def get_use_lcd():
+  return get_data(KEY_USE_LCD)
 
+#----------------------------------------------------------------------
 
-  def run(self):
-    self.command('mpc clear')
-    self.command('mpc load ' + self.text)
-    self.command('mpc play')
+def shell_command(cmd):
+  try:
+    return commands.getstatusoutput(cmd)[1].rstrip().split(STR_NEWLINE)
+  except:
+    return [ ]
 
-    Applet.run(self)
+#----------------------------------------------------------------------
 
-  def left(self):
-    'Return from applet'
-    raise FinishException
+def mpc_clear():
+  shell_command(CMD_MPC_CLEAR)
 
-  def up(self):
-    try:
-      pos = self.volumes.index(self.volume)
-    except:
-      pos = 0
+#----------------------------------------------------------------------
 
-    if pos < len(self.volumes) - 1:
-      self.command('mpc volume %d' % self.volumes[pos + 1])
+def mpc_stop():
+  shell_command(CMD_MPC_STOP)
 
-  def down(self):
-    try:
-      pos = self.volumes.index(self.volume)
-    except:
-      pos = 0
+#----------------------------------------------------------------------
 
-    if pos > 0:
-      self.command('mpc volume %d' % self.volumes[pos - 1])
+def mpc_play():
+  shell_command(CMD_MPC_PLAY)
 
+#----------------------------------------------------------------------
 
-if __name__ == '__main__':
-  Radio().run()
+def mpc_load(station):
+  shell_command(CMD_MPC_LOAD + STR_SPACE + station)
+
+#----------------------------------------------------------------------
+
+def mpc_volume(vol):
+  shell_command(CMD_MPC_VOLUME + STR_SPACE + str(vol))
+
+#----------------------------------------------------------------------
+
+def mpc_current():
+  return shell_command(CMD_MPC_CURRENT)[0]
+
+#----------------------------------------------------------------------
+
+def mpc_lsplaylists():
+  return shell_command(CMD_MPC_LSPLAYLISTS)
+
+#----------------------------------------------------------------------
+
+def debug_init():
+  pygame.init()
+  global screen, font
+  screen = pygame.display.set_mode((PYGAME_WIDTH, PYGAME_HEIGHT))
+  font = pygame.font.SysFont(FONT_MONOSPACE, FONT_MONOSPACE_SIZE)
+  pygame.display.set_caption(PYGAME_CAPTION)
+
+#----------------------------------------------------------------------
+
+def debug_write_lines(lines):
+  global screen, font
+  if backlight == Adafruit_CharLCDPlate.ON:
+    screen.fill((64, 64, 64))
+  elif backlight == Adafruit_CharLCDPlate.RED:
+    screen.fill((64, 0, 0))
+  else:
+    screen.fill((0, 0, 0))
+  i = 0
+  while (i < len(lines)):
+    line = font.render(lines[i], 2, (255, 255, 0))
+    screen.blit(line, (0, FONT_MONOSPACE_SIZE * i))
+    i = i + 1
+  pygame.display.flip()
+
+#----------------------------------------------------------------------
+
+def lcd_init():
+  global lcd
+  try:
+    lcd = Adafruit_CharLCDPlate()
+    lcd.begin(COLS, ROWS)
+    lcd.clear()
+    lcd.message("MMM")
+  except:
+    set_data(KEY_USE_LCD, False)
+
+#----------------------------------------------------------------------
+
+def lcd_write_lines(lines):
+  lcd.home()
+  i = 0
+  while (i < len(lines)):
+    lcd.message(lines[i])
+    i = i + 1
+
+#----------------------------------------------------------------------
+
+def write_lines(lines):
+  if get_debug():
+    debug_write_lines(lines)
+  if get_use_lcd():
+    lcd_write_lines(lines)
+
+#----------------------------------------------------------------------
+
+def set_lastinput():
+  global lastinput, input
+  lastinput[KEY_LEFT] = input[KEY_LEFT]
+  lastinput[KEY_RIGHT] = input[KEY_RIGHT]
+  lastinput[KEY_UP] = input[KEY_UP]
+  lastinput[KEY_DOWN] = input[KEY_DOWN]
+  lastinput[KEY_SELECT] = input[KEY_SELECT]
+
+#----------------------------------------------------------------------
+
+def reset_input():
+  global lastinput, input
+  input[KEY_LEFT] = False
+  input[KEY_RIGHT] = False
+  input[KEY_UP] = False
+  input[KEY_DOWN] = False
+  input[KEY_SELECT] = False
+
+#----------------------------------------------------------------------
+
+def debug_get_input():
+  global input
+  for event in pygame.event.get():
+    if event.type == pygame.QUIT:
+      pygame.quit()
+      sys.exit()
+  pressed = pygame.key.get_pressed()
+  if pressed[pygame.K_q] == 1:
+    sys.exit()
+  if pressed[pygame.K_SPACE] == 1:
+    input[KEY_SELECT] = True
+  if pressed[pygame.K_RETURN] == 1:
+    input[KEY_SELECT] = True
+  if pressed[pygame.K_LEFT] == 1:
+    input[KEY_LEFT] = True
+  if pressed[pygame.K_RIGHT] == 1:
+    input[KEY_RIGHT] = True
+  if pressed[pygame.K_UP] == 1:
+    input[KEY_UP] = True
+  if pressed[pygame.K_DOWN] == 1:
+    input[KEY_DOWN] = True
+
+#----------------------------------------------------------------------
+
+def lcd_get_input():
+  if lcd.buttonPressed(lcd.SELECT):
+    input[KEY_SELECT] = True
+  if lcd.buttonPressed(lcd.LEFT):
+    input[KEY_LEFT] = True
+  if lcd.buttonPressed(lcd.RIGHT):
+    input[KEY_RIGHT] = True
+  if lcd.buttonPressed(lcd.UP):
+    input[KEY_UP] = True
+  if lcd.buttonPressed(lcd.DOWN):
+    input[KEY_DOWN] = True
+
+#----------------------------------------------------------------------
+
+def get_input():
+  if get_debug():
+    debug_get_input()
+  if get_use_lcd():
+    lcd_get_input()
+
+#----------------------------------------------------------------------
+
+def get_next_station(dir = 1):
+  stations = sorted(mpc_lsplaylists())
+  count = len(stations)
+  if count == 0:
+    return STR_NO_STATION
+  try:
+    station = get_data(KEY_STATION, STR_NO_STATION)
+    index = stations.index(station)
+    return stations[(index + count + dir) % count]
+  except:
+    return stations[0]
+
+#----------------------------------------------------------------------
+ 
+def play_station(station):
+  set_station(station)
+  volume = get_volume()
+  mpc_stop()
+  mpc_clear()
+  mpc_load(station)
+  mpc_play()
+  mpc_volume(volume)
+
+#----------------------------------------------------------------------
+ 
+def play_next_station(dir = 1):
+  station = get_next_station(dir)
+  if station == STR_NO_STATION:
+    return
+  play_station(station)
+  print get_station(), get_volume()
+
+#----------------------------------------------------------------------
+
+def adjust_volume(dir = 5):
+  volume = get_volume() + dir
+  if volume < 0:
+    volume = 0
+  if volume > 100:
+    volume = 100
+  set_volume(volume)
+  mpc_volume(volume)
+  print get_station(), get_volume()
+
+#----------------------------------------------------------------------
+
+def radio_fix():
+  print "MPC FIX"
+  mpc_stop()
+  mpc_play()
+
+#----------------------------------------------------------------------
+
+def lcd_set_backlight(color):
+  lcd.backlight(color)
+
+def set_backlight(color):
+  global backlight
+  if backlight == color:
+    return
+  if get_use_lcd():
+    lcd_set_backlight(color)
+  backlight = color
+
+#----------------------------------------------------------------------
+
+def cancel_idle():
+  global last_input_time
+  last_input_time = time()
+  set_backlight(Adafruit_CharLCDPlate.ON)
+
+#----------------------------------------------------------------------
+
+def start_idle():
+  set_backlight(Adafruit_CharLCDPlate.OFF)
+
+#----------------------------------------------------------------------
+
+def shutdown_now():
+  sys.exit()
+
+#----------------------------------------------------------------------
+
+read_data()
+write_data()
+if get_use_lcd():
+  lcd_init()
+if not get_use_lcd():
+  set_data(KEY_DEBUG, True)
+if get_debug():
+  debug_init()
+reset_input()
+write_lines_time = 0
+shutdown_time = 0
+while True:
+  set_lastinput()
+  reset_input()
+  get_input()
+  if input[KEY_LEFT]:
+    cancel_idle()
+    if not lastinput[KEY_LEFT]:
+      play_next_station(-1)
+      scroller_time = time()
+  elif input[KEY_RIGHT]:
+    cancel_idle()
+    if not lastinput[KEY_RIGHT]:
+      play_next_station(1)
+      scroller_time = time()
+  elif input[KEY_UP]:
+    cancel_idle()
+    if not lastinput[KEY_UP]:
+      adjust_volume(5)
+  elif input[KEY_DOWN]:
+    cancel_idle()
+    if not lastinput[KEY_DOWN]:
+      adjust_volume(-5)
+  elif input[KEY_SELECT]:
+    cancel_idle()
+    if not lastinput[KEY_SELECT]:
+      radio_fix()
+      shutdown_time = time() + SHUTDOWN_COUNTDOWN
+    if time() > shutdown_time:
+      shutdown_now()
+    write_lines( [
+      scroller("Shutdown in " + "{:.1f}".format(shutdown_time - time())),
+      scroller(shell_command("hostname -I")[0])
+    ] )
+    write_lines_time = 0
+  else:
+    if time() > last_input_time + 5.0:
+      if backlight != Adafruit_CharLCDPlate.OFF:
+        start_idle()
+    if time() >= write_lines_time:
+      write_lines_time = time() + 1.0
+      write_lines( [
+        scroller(get_station() + " " + str(get_volume())),
+        scroller(strftime('%H:%M:%S %d/%m') + ' ' + mpc_current())
+      ] )
+
