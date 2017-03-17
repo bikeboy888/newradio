@@ -11,7 +11,8 @@ from time import time, strftime
 
 #----------------------------------------------------------------------
 
-RADIO_CONFIG_FILE = '/home/pi/radio/radio.cfg'
+# RADIO_CONFIG_FILE = '/home/pi/radio/radio.cfg'
+RADIO_CONFIG_FILE = '/tmp/radio.cfg'
 KEY_STATION = 'station'
 KEY_VOLUME = 'volume'
 KEY_DEBUG = 'debug'
@@ -95,10 +96,10 @@ def set_data(prop, val):
 
 def scroller(text):
   if len(text) <= COLS:
-    return (text + STR_SPACE*COLS)[0:COLS-1]
+    return (text + STR_SPACE*COLS)[0:COLS]
   scroller_text = text + STR_SPACE
-  skip = int((time() - scroller_time)) % len(scroller_text)
-  scroller_text = (scroller_text + scroller_text)[skip:skip+COLS-1]
+  skip = int(((time() - scroller_time)) * 2.0) % len(scroller_text)
+  scroller_text = (scroller_text + scroller_text)[skip:skip+COLS]
   return scroller_text
 
 #----------------------------------------------------------------------
@@ -415,19 +416,23 @@ while True:
     if not (lastinput & FLAG_LEFT):
       play_next_station(-1)
       scroller_time = time()
+      write_lines_time = 0
   elif input & FLAG_RIGHT:
     cancel_idle()
     if not (lastinput & FLAG_RIGHT):
       play_next_station(1)
       scroller_time = time()
+      write_lines_time = 0
   elif input & FLAG_UP:
     cancel_idle()
     if not (lastinput & FLAG_UP):
       adjust_volume(5)
+      write_lines_time = 0
   elif input & FLAG_DOWN:
     cancel_idle()
     if not (lastinput & FLAG_DOWN):
       adjust_volume(-5)
+      write_lines_time = 0
   elif input & FLAG_SELECT:
     cancel_idle()
     if not (lastinput & FLAG_SELECT):
@@ -441,11 +446,13 @@ while True:
     ] )
     write_lines_time = 0
   else:
+    if lastinput & FLAG_SELECT:
+      write_lines_time = 0
     if time() > last_input_time + 5.0:
       if backlight != Adafruit_CharLCDPlate.OFF:
         start_idle()
     if time() >= write_lines_time:
-      write_lines_time = time() + 1.0
+      write_lines_time = time() + 0.5
       write_lines( [
         scroller(get_station() + STR_SPACE + str(get_volume())),
         scroller(strftime(FORMAT_TIME) + STR_SPACE + mpc_current())
