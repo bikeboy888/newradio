@@ -399,6 +399,7 @@ if get_debug():
 reset_input()
 write_lines_time = 0
 shutdown_time = 0
+play_next_station(0)
 while True:
   set_lastinput()
   reset_input()
