@@ -30,6 +30,8 @@ CMD_MPC_CLEAR = 'mpc clear'
 CMD_MPC_LOAD = 'mpc load'
 CMD_MPC_VOLUME = 'mpc volume'
 CMD_MPC_CURRENT = 'mpc current'
+CMD_HOSTNAME = 'hostname -I'
+CMD_SHUTDOWN = 'sudo shutdown -h now'
 PYGAME_CAPTION = 'Internet Radio'
 PYGAME_WIDTH = 500
 PYGAME_HEIGHT = 100
@@ -39,6 +41,14 @@ SHUTDOWN_COUNTDOWN = 5
 STR_NEWLINE = '\n'
 STR_NO_STATION = ''
 STR_SPACE = ' '
+STR_WELCOME = 'Welcome'
+STR_WELCOME_2 = ''
+STR_SHUTDOWN_IN = 'Shutdown in'
+STR_SHUTTING_DOWN = 'Shutting down'
+STR_SEE_YOU_LATER = 'See you later!'
+STR_MPC_FIX = 'mpc fix'
+FORMAT_TIME = '%H:%M:%S %d/%m'
+FORMAT_SHUTDOWN_TIME = '{:.1f}'
 COLS = 16
 ROWS = 2
 
@@ -85,8 +95,8 @@ def set_data(prop, val):
 
 def scroller(text):
   if len(text) <= COLS:
-    return text
-  scroller_text = text + ' '
+    return (text + STR_SPACE*COLS)[0:COLS-1]
+  scroller_text = text + STR_SPACE
   skip = int((time() - scroller_time)) % len(scroller_text)
   scroller_text = (scroller_text + scroller_text)[skip:skip+COLS-1]
   return scroller_text
@@ -173,7 +183,7 @@ def mpc_volume(vol):
 #----------------------------------------------------------------------
 
 def mpc_current():
-  return shell_command(CMD_MPC_CURRENT)[0]
+  return STR_SPACE.join(shell_command(CMD_MPC_CURRENT))
 
 #----------------------------------------------------------------------
 
@@ -214,7 +224,6 @@ def lcd_init():
     lcd = Adafruit_CharLCDPlate()
     lcd.begin(COLS, ROWS)
     lcd.clear()
-    lcd.message("MMM")
   except:
     set_data(KEY_USE_LCD, False)
 
@@ -301,6 +310,11 @@ def get_next_station(dir = 1):
     return stations[0]
 
 #----------------------------------------------------------------------
+
+def get_shutdown_text():
+  return STR_SHUTDOWN_IN + STR_SPACE + FORMAT_SHUTDOWN_TIME.format(shutdown_time - time())
+
+#----------------------------------------------------------------------
  
 def play_station(station):
   set_station(station)
@@ -335,7 +349,7 @@ def adjust_volume(dir = 5):
 #----------------------------------------------------------------------
 
 def radio_fix():
-  print "MPC FIX"
+  print STR_MPC_FIX
   mpc_stop()
   mpc_play()
 
@@ -368,11 +382,11 @@ def start_idle():
 
 def shutdown_now():
   write_lines( [
-    "Shutting down",
-    "See you later!"
+    scroller(STR_SHUTTING_DOWN),
+    scroller(STR_SEE_YOU_LATER)
   ] );
   set_backlight(Adafruit_CharLCDPlate.OFF)
-  shell_command("sudo shutdown -h now")
+  shell_command(CMD_SHUTDOWN)
   sys.exit()
 
 #----------------------------------------------------------------------
@@ -385,6 +399,10 @@ if not get_use_lcd():
   set_data(KEY_DEBUG, True)
 if get_debug():
   debug_init()
+write_lines( [
+  scroller(STR_WELCOME),
+  scroller(STR_WELCOME_2)
+] )
 input = 0
 write_lines_time = 0
 shutdown_time = 0
@@ -418,8 +436,8 @@ while True:
     if time() > shutdown_time:
       shutdown_now()
     write_lines( [
-      scroller("Shutdown in " + "{:.1f}".format(shutdown_time - time())),
-      scroller(shell_command("hostname -I")[0])
+      scroller(get_shutdown_text()),
+      scroller(STR_SPACE.join(shell_command(CMD_HOSTNAME)))
     ] )
     write_lines_time = 0
   else:
@@ -429,7 +447,7 @@ while True:
     if time() >= write_lines_time:
       write_lines_time = time() + 1.0
       write_lines( [
-        scroller(get_station() + " " + str(get_volume())),
-        scroller(strftime('%H:%M:%S %d/%m') + ' ' + mpc_current())
+        scroller(get_station() + STR_SPACE + str(get_volume())),
+        scroller(strftime(FORMAT_TIME) + STR_SPACE + mpc_current())
       ] )
 
